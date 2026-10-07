@@ -16,7 +16,7 @@ O build usa `npm install --include=dev` porque `NODE_ENV=production` omitiria `t
 
 ## 1. Uso pessoal em um serviço
 
-Crie PostgreSQL gerenciado, defina `DATABASE_URL`, `AUTH_MODE=multi`, `HOST=0.0.0.0`, `NODE_ENV=production`, `SERVE_WEB=true`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE=lax` e `CLIENT_URL` igual à URL pública do serviço. Gere segredos diferentes para `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` e uma chave base64 de 32 bytes para `ENCRYPTION_KEY`. Guarde a chave fora do repositório. Rode `npm install`, `npm -w apps/server exec prisma generate`, `npm run build`, `npm -w apps/server run db:deploy` e `npm -w apps/server run start`. Não use `npm start` da raiz no Render, pois ele inicia Docker local.
+Crie PostgreSQL gerenciado, defina `DATABASE_URL`, `AUTH_MODE=multi`, `HOST=0.0.0.0`, `NODE_ENV=production`, `SERVE_WEB=true`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE=lax` e `CLIENT_URL` igual à URL pública do serviço. Gere segredos diferentes para `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` e uma chave base64 de 32 bytes para `ENCRYPTION_KEY`. Guarde a chave fora do repositório. Rode `npm install`, `npm run build` (o build do servidor já roda `prisma generate`), `npm -w apps/server run db:deploy` e `npm run start`. No Render (`RENDER=true`) o `npm run start` não tenta subir o Docker; localmente ele sobe o Postgres antes.
 
 Antes de enviar arquivos, implemente `StorageDriver` para S3/R2: o armazenamento local é efêmero em hospedagens comuns. O serviço de um processo pode usar cache e registro de streams em memória. A saúde é verificada em `/api/health`.
 

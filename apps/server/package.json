@@ -1,6 +1,6 @@
 {
   "name":"@llm-lucca/server","version":"1.0.0","private":true,"type":"module",
-  "scripts":{"dev":"tsx watch src/index.ts","build":"tsc -p tsconfig.json","start":"node dist/src/index.js","db:migrate":"prisma migrate dev","db:deploy":"prisma migrate deploy","db:seed":"tsx prisma/seed.ts","test":"vitest run"},
+  "scripts":{"dev":"tsx watch src/index.ts","build":"prisma generate && tsc -p tsconfig.json","start":"node dist/src/index.js","db:migrate":"prisma migrate dev","db:deploy":"prisma migrate deploy","db:seed":"tsx prisma/seed.ts","test":"vitest run"},
   "dependencies":{"@prisma/client":"^6.17.1","bcrypt":"^6.0.0","cookie-parser":"^1.4.7","cors":"^2.8.5","dotenv":"^17.2.3","express":"^4.21.2","express-rate-limit":"^8.1.0","helmet":"^8.1.0","jsonwebtoken":"^9.0.2","multer":"^2.0.2","pdf-parse":"^1.1.1","pino":"^10.0.0","pino-http":"^11.0.0","zod":"^4.1.12"},
   "devDependencies":{"@types/bcrypt":"^6.0.0","@types/cookie-parser":"^1.4.9","@types/cors":"^2.8.19","@types/express":"^4.17.23","@types/jsonwebtoken":"^9.0.10","@types/multer":"^2.0.0","@types/node":"^24.7.0","@types/pdf-parse":"^1.1.5","@types/supertest":"^6.0.3","prisma":"^6.17.1","supertest":"^7.1.4","tsx":"^4.20.6","vitest":"^3.2.4"}
 }

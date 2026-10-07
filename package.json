@@ -11,7 +11,7 @@
     "setup": "node scripts/setup.mjs",
     "dev": "docker compose up -d db && concurrently -n api,web \"npm -w apps/server run dev\" \"npm -w apps/web run dev\"",
     "build": "npm -w apps/web run build && npm -w apps/server run build",
-    "start": "docker compose up -d db && node scripts/start.mjs",
+    "start": "node scripts/start.mjs",
     "db:migrate": "node scripts/run-prisma.mjs",
     "db:studio": "npm -w apps/server exec prisma studio",
     "test": "npm -w apps/server run test",
