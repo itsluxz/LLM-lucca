@@ -1648,6 +1648,31 @@ details.attachment-chip[open] {
 .settings-panel .check input {
   accent-color: var(--primary);
 }
+.settings-panel .extension-item {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.settings-panel .extension-item input {
+  margin-top: 3px;
+  flex: none;
+}
+.extension-item span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.extension-item small {
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.extensions-panel .settings-note {
+  margin: 0;
+}
 .auth-page,
 .loading {
   min-height: 100dvh;
@@ -1882,4 +1907,45 @@ details.attachment-chip[open] {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* arquivos criados pelas extensões (Word, Excel, PowerPoint, PDF) */
+.file-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  max-width: 100%;
+  text-align: left;
+}
+.file-download span {
+  overflow-wrap: anywhere;
+}
+.file-download:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+.file-download:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+.file-download.docx svg { color: #2b6cd8; }
+.file-download.xlsx svg { color: #1f9d55; }
+.file-download.pptx svg { color: #d4572a; }
+.file-download.pdf svg { color: var(--accent); }
+.file-download .spin {
+  animation: file-download-spin 1s linear infinite;
+}
+@keyframes file-download-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .file-download .spin { animation: none; }
 }

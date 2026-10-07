@@ -4,6 +4,7 @@ import { api, apiBase, authHeaders, json } from '../services/api';
 import { readSse } from '../services/sse';
 import { draftMessage, liveMessages, useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
+import { toolsQuery } from './useTools';
 import type { Conversation, Usage } from '../types';
 export function useChatStream() {
   const query = useQueryClient();
@@ -12,8 +13,12 @@ export function useChatStream() {
   const stream = useCallback(
     async (id: string, content?: string, model?: string, webSearch = false) => {
       state.start(content ?? null);
-      const maxTokens = useUiStore.getState().maxTokens ?? undefined;
+      const { maxTokens: limit, disabledTools } = useUiStore.getState();
+      const maxTokens = limit ?? undefined;
       try {
+        const tools = (await query.ensureQueryData(toolsQuery).catch(() => []))
+          .map((t) => t.id)
+          .filter((t) => !disabledTools.includes(t));
         const res = await fetch(
           `${apiBase}/chat/${id}/${content === undefined ? 'regenerate' : 'stream'}`,
           {
@@ -25,8 +30,8 @@ export function useChatStream() {
             },
             body: json(
               content === undefined
-                ? { webSearch, maxTokens }
-                : { content, model, webSearch, maxTokens },
+                ? { webSearch, maxTokens, tools }
+                : { content, model, webSearch, maxTokens, tools },
             ),
           },
         );

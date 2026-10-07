@@ -84,3 +84,8 @@ export type ProviderKey = {
   enabled: boolean;
   baseUrl?: string | null;
 };
+export type ToolInfo = {
+  id: string;
+  title: string;
+  description: string;
+};

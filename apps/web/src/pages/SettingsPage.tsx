@@ -11,11 +11,13 @@ import {
 } from '../stores/authStore';
 import { Avatar } from '../components/layout/ProfileSwitcher';
 import { PersonaImagesEditor } from '../components/mascot/PersonaImagesEditor';
+import { useTools } from '../hooks/useTools';
 import {
   ImageUp,
   KeyRound,
   UserRound,
   Palette,
+  Puzzle,
   Trash2,
   Save,
 } from 'lucide-react';
@@ -23,7 +25,7 @@ type ProviderData = {
   supported: Array<{ id: string; name: string }>;
   configured: ProviderKey[];
 };
-type Tab = 'providers' | 'profile' | 'appearance';
+type Tab = 'providers' | 'profile' | 'extensions' | 'appearance';
 const colorOptions: Array<{ id: ColorTheme; label: string; colors: string }> = [
   { id: 'roxo', label: 'Roxo', colors: '#7b3fe4, #e8336e' },
   { id: 'rosa', label: 'Rosa', colors: '#d63384, #7b3fe4' },
@@ -61,7 +63,11 @@ export default function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const tabParam = params.get('tab');
   const tab: Tab =
-    tabParam === 'profile' || tabParam === 'appearance' ? tabParam : 'providers';
+    tabParam === 'profile' ||
+    tabParam === 'extensions' ||
+    tabParam === 'appearance'
+      ? tabParam
+      : 'providers';
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   const query = useQueryClient();
   const toast = useUiStore((s) => s.showToast);
@@ -151,6 +157,12 @@ export default function SettingsPage() {
           onClick={() => setTab('profile')}
         >
           <UserRound size={17} /> Perfil
+        </button>
+        <button
+          className={tab === 'extensions' ? 'active' : ''}
+          onClick={() => setTab('extensions')}
+        >
+          <Puzzle size={17} /> Extensões
         </button>
         <button
           className={tab === 'appearance' ? 'active' : ''}
@@ -251,6 +263,7 @@ export default function SettingsPage() {
           </button>
         </div>
       )}
+      {tab === 'extensions' && <ExtensionsPanel />}
       {tab === 'appearance' && (
         <div className="settings-panel">
           <div>
@@ -290,6 +303,36 @@ export default function SettingsPage() {
           </label>
         </div>
       )}
+    </div>
+  );
+}
+function ExtensionsPanel() {
+  const { data: tools = [], isLoading, error } = useTools();
+  const disabled = useUiStore((s) => s.disabledTools);
+  const setToolEnabled = useUiStore((s) => s.setToolEnabled);
+  return (
+    <div className="settings-panel extensions-panel">
+      <p className="settings-note">
+        Extensões são ferramentas que o modelo pode usar sozinho durante a
+        resposta. Funcionam nos modelos com suporte a ferramentas; nos demais,
+        a resposta segue normalmente sem elas. Com a pesquisa na web da OpenAI
+        ligada, as extensões não são usadas.
+      </p>
+      {isLoading && <p>Carregando…</p>}
+      {error && <p>Não foi possível carregar as extensões.</p>}
+      {tools.map((t) => (
+        <label key={t.id} className="check extension-item">
+          <input
+            type="checkbox"
+            checked={!disabled.includes(t.id)}
+            onChange={(e) => setToolEnabled(t.id, e.target.checked)}
+          />
+          <span>
+            <strong>{t.title}</strong>
+            <small>{t.description}</small>
+          </span>
+        </label>
+      ))}
     </div>
   );
 }

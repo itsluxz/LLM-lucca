@@ -14,6 +14,7 @@ import type { Message } from '../../types';
 import { Mascot } from '../mascot/Mascot';
 import { TokenUsageBar } from './TokenUsageBar';
 import { GeneratedImage, generatedImagePrefix } from './GeneratedImage';
+import { FileDownload, downloadPrefix } from './FileDownload';
 import { Avatar } from '../layout/ProfileSwitcher';
 import { useAuthStore, usePersonaName } from '../../stores/authStore';
 export function MessageBubble({
@@ -99,6 +100,15 @@ export function MessageBubble({
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeHighlight, rehypeKatex]}
               components={{
+                a({ href, children, node: _node, ...rest }) {
+                  if (typeof href === 'string' && href.startsWith(downloadPrefix))
+                    return <FileDownload href={href}>{children}</FileDownload>;
+                  return (
+                    <a href={href} target="_blank" rel="noreferrer" {...rest}>
+                      {children}
+                    </a>
+                  );
+                },
                 img({ src, alt }) {
                   if (typeof src === 'string' && src.startsWith(generatedImagePrefix))
                     return <GeneratedImage src={src} alt={alt} />;

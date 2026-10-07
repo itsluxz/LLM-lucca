@@ -16,6 +16,7 @@ Site de chat com IAs no estilo ChatGPT/Claude. Você cola as chaves de API dos s
 10. [Configuração (.env)](#configuração-env)
 11. [Banco e backup](#banco-e-backup)
 12. [Adicionar um provedor](#adicionar-um-provedor)
+    · [Criar uma extensão](#criar-uma-extensão)
 13. [Caminho de escala](#caminho-de-escala)
 14. [Testes](#testes)
 
@@ -28,6 +29,7 @@ Site de chat com IAs no estilo ChatGPT/Claude. Você cola as chaves de API dos s
 - **Projetos**: pastas com instruções próprias e arquivos de conhecimento (.txt, .md, .pdf, código…) injetados como contexto.
 - **Imagens**: envio de imagens para modelos com visão e geração de imagens por modelos que suportam.
 - **Pesquisa na web** nativa nos provedores que oferecem (ex.: Anthropic), com lista de fontes.
+- **Extensões** (ferramentas) que o modelo usa sozinho durante a resposta: calculadora, leitura de links, data/hora e **criação de arquivos Word, Excel, PowerPoint e PDF** para baixar. Cada uma pode ser ligada ou desligada em **Configurações → Extensões**.
 - **Perfis e persona**: no modo local há vários perfis; cada um pode ter nome e imagens próprias para a assistente (substituindo o mascote) e paleta de cores.
 - **Autenticação em dois modos**: `local` (usuário único, sem login) e `multi` (e-mail e senha, JWT).
 - **Chaves criptografadas** no banco (AES-256-GCM).
@@ -308,6 +310,54 @@ Para restaurar, copie o arquivo para o container e use `psql -U lucca -d llm_luc
 2. Registre em `llm/registry.ts`.
 3. Inclua o identificador no schema de `modules/providers/routes.ts`.
 4. Adicione testes de parsing e de uso em `src/tests`.
+
+## Criar uma extensão
+
+As extensões ficam em `apps/server/src/llm/tools/`. Cada uma é um objeto `Tool`:
+
+```ts
+export const minhaExtensao: Tool<{ cidade: string }> = {
+  name: 'clima',                      // id enviado ao modelo (sem espaços)
+  title: 'Clima',                     // nome nas Configurações
+  label: 'Consultando o clima',       // aparece no chat enquanto roda
+  description: 'Retorna o clima atual de uma cidade. Use quando…',
+  parameters: {                       // JSON Schema simples
+    type: 'object',
+    properties: { cidade: { type: 'string', description: 'Ex.: São Paulo' } },
+    required: ['cidade'],
+  },
+  schema: z.object({ cidade: z.string().min(1) }), // valida o que o modelo mandou
+  async execute({ cidade }, ctx) {
+    // use ctx.signal no fetch para o botão "parar" funcionar
+    return `Em ${cidade}: 24 °C, céu limpo`; // texto que o modelo lê
+  },
+};
+```
+
+Depois, adicione-a à lista `tools` em `llm/tools/index.ts`. Ela aparece sozinha em **Configurações → Extensões**, já ligada.
+
+Como funciona por dentro:
+
+1. O frontend manda em cada mensagem a lista de extensões ligadas (`tools`).
+2. A rota de chat passa as specs e uma função `runTool` ao adaptador.
+3. O adaptador envia as ferramentas no formato do provedor (`tools` da OpenAI, `input_schema` da Anthropic, `functionDeclarations` do Gemini). Quando o modelo pede uma, ele mostra o `label` no chat, executa `runTool`, devolve o resultado e chama o modelo de novo. São no máximo 5 voltas (`maxToolRounds`); na última as ferramentas ficam bloqueadas e o modelo precisa responder.
+4. O uso de tokens soma todas as voltas, porque cada uma é cobrada.
+
+### Arquivos gerados (Word, Excel, PowerPoint, PDF)
+
+As extensões `criar_word`, `criar_excel`, `criar_powerpoint` e `criar_pdf` ficam em `llm/tools/files/` e usam bibliotecas JavaScript (`docx`, `exceljs`, `pptxgenjs`, `pdfkit`): não precisam do Office instalado e funcionam no Render.
+
+- O modelo descreve o conteúdo em JSON: blocos (`heading`, `paragraph`, `bullets`, `numbered`, `table`, `quote`, `page_break`) para Word e PDF, abas e linhas para o Excel, e slides para o PowerPoint. Textos aceitam `**negrito**` e `*itálico*`.
+- No Excel, as células chegam como texto: `=SUM(B2:B5)` vira fórmula, `1234.5` vira número e o resto continua texto (CEPs e códigos com zero à esquerda são preservados).
+- O arquivo é salvo pelo `StorageDriver` com o dono na chave (`dl_<userId>_<aleatório>_<tipo>`) e servido por `GET /api/downloads/:chave/:nome`, que só entrega ao dono. A rota de chat anexa os links no fim da resposta; no chat eles viram botões de download (`FileDownload.tsx`).
+- O PDF usa as fontes padrão (latinas, com acentos); emojis são removidos.
+- No Render, configure o Disk e `STORAGE_LOCAL_PATH=/var/data/uploads` para os arquivos não sumirem a cada deploy.
+
+Regras importantes:
+
+- **Erros viram texto**: argumentos inválidos ou `ToolError` voltam ao modelo como `Erro: …`, para ele se corrigir. Use `ToolError` para mensagens que o modelo pode ler; outros erros viram uma mensagem genérica.
+- **Segurança**: a extensão roda no servidor. Valide tudo com zod e nunca acesse endereços que o modelo escolhe sem checar (veja `assertPublicUrl` em `fetchUrl.ts`, que bloqueia a rede interna).
+- Modelos sem suporte a ferramentas (comum no Ollama e em alguns do OpenRouter) recebem a mensagem de novo sem elas. Com a pesquisa na web da OpenAI ligada (Responses API), as extensões não são enviadas.
 
 ## Caminho de escala
 

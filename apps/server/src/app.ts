@@ -19,6 +19,8 @@ import { conversationRoutes } from './modules/conversations/routes.js';
 import { messageRoutes } from './modules/messages/routes.js';
 import { chatRoutes } from './modules/chat/routes.js';
 import { imageRoutes } from './modules/images/routes.js';
+import { toolRoutes } from './modules/tools/routes.js';
+import { downloadRoutes } from './modules/downloads/routes.js';
 export const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', env.TRUST_PROXY);
@@ -54,6 +56,8 @@ api.use('/conversations', conversationRoutes);
 api.use('/messages', messageRoutes);
 api.use('/chat', chatRoutes);
 api.use('/images', imageRoutes);
+api.use('/tools', toolRoutes);
+api.use('/downloads', downloadRoutes);
 api.use((_req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 app.use('/api', api);
 if (env.SERVE_WEB) {

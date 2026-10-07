@@ -7,9 +7,23 @@ import type {
 } from '../types.js';
 import { checked, parseSse } from './sseParser.js';
 import { latestGeneration } from '../modelFilters.js';
+import {
+  activeTools,
+  addUsage,
+  maxToolRounds,
+  RoundText,
+  toolLabel,
+} from '../tools/loop.js';
 const nonChatModel =
   /(tts|image|native-audio|embedding|transcribe|lyria|robotics|computer-use|deep-research|antigravity|nano-banana)/i;
 const baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+
+type GeminiPart = {
+  text?: string;
+  thought?: boolean;
+  thoughtSignature?: string;
+  functionCall?: { name?: string; args?: unknown; id?: string };
+};
 
 type GeminiModel = {
   name: string;
@@ -90,7 +104,7 @@ export const google: LLMProvider = {
       .filter((m) => m.role === 'system')
       .map((m) => m.content)
       .join('\n\n');
-    const contents = p.messages
+    const contents: Array<{ role: string; parts: unknown[] }> = p.messages
       .filter((m) => m.role !== 'system')
       .map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
@@ -101,60 +115,109 @@ export const google: LLMProvider = {
           { text: m.content },
         ],
       }));
-    const res = await checked(
-      await fetch(
-        `${baseUrl}/models/${encodeURIComponent(p.model)}:streamGenerateContent?alt=sse`,
-        {
-          method: 'POST',
-          signal: p.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': p.apiKey,
-          },
-          body: JSON.stringify({
-            ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-            contents,
-            ...(p.temperature !== undefined || p.maxTokens !== undefined
-              ? {
-                  generationConfig: {
-                    ...(p.temperature !== undefined
-                      ? { temperature: p.temperature }
-                      : {}),
-                    ...(p.maxTokens !== undefined
-                      ? { maxOutputTokens: p.maxTokens }
-                      : {}),
-                  },
-                }
-              : {}),
-          }),
-        },
-      ),
-    );
-    if (!res.body) throw new Error('Provedor não abriu o stream');
+    const tools = activeTools(p);
+    const text = new RoundText();
     let usage: TokenUsage | null = null;
     let visible = false;
     let blocked = false;
-    for await (const frame of parseSse(res.body)) {
-      const data = JSON.parse(frame.data) as {
-        candidates?: Array<{
-          content?: { parts?: Array<{ text?: string; thought?: boolean }> };
-          finishReason?: string;
-        }>;
-        promptFeedback?: { blockReason?: string };
-        usageMetadata?: Record<string, unknown>;
-      };
-      const candidate = data.candidates?.[0];
-      blocked ||= Boolean(data.promptFeedback?.blockReason);
-      blocked ||= Boolean(
-        candidate?.finishReason &&
-          !['STOP', 'MAX_TOKENS'].includes(candidate.finishReason),
+    for (let round = 0; round < maxToolRounds; round++) {
+      const last = round === maxToolRounds - 1;
+      const res = await checked(
+        await fetch(
+          `${baseUrl}/models/${encodeURIComponent(p.model)}:streamGenerateContent?alt=sse`,
+          {
+            method: 'POST',
+            signal: p.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': p.apiKey,
+            },
+            body: JSON.stringify({
+              ...(system
+                ? { systemInstruction: { parts: [{ text: system }] } }
+                : {}),
+              contents,
+              ...(tools.length
+                ? {
+                    tools: [
+                      {
+                        functionDeclarations: tools.map((t) => ({
+                          name: t.name,
+                          description: t.description,
+                          parameters: t.parameters,
+                        })),
+                      },
+                    ],
+                    // última volta: o modelo precisa responder com texto
+                    ...(last
+                      ? { toolConfig: { functionCallingConfig: { mode: 'NONE' } } }
+                      : {}),
+                  }
+                : {}),
+              ...(p.temperature !== undefined || p.maxTokens !== undefined
+                ? {
+                    generationConfig: {
+                      ...(p.temperature !== undefined
+                        ? { temperature: p.temperature }
+                        : {}),
+                      ...(p.maxTokens !== undefined
+                        ? { maxOutputTokens: p.maxTokens }
+                        : {}),
+                    },
+                  }
+                : {}),
+            }),
+          },
+        ),
       );
-      for (const part of candidate?.content?.parts ?? [])
-        if (part.text && !part.thought) {
-          visible = true;
-          yield { type: 'delta', text: part.text };
+      if (!res.body) throw new Error('Provedor não abriu o stream');
+      text.nextRound();
+      // partes do modelo nesta volta, devolvidas como vieram (inclui thoughtSignature)
+      const parts: GeminiPart[] = [];
+      let roundUsage: TokenUsage | null = null;
+      for await (const frame of parseSse(res.body)) {
+        const data = JSON.parse(frame.data) as {
+          candidates?: Array<{
+            content?: { parts?: GeminiPart[] };
+            finishReason?: string;
+          }>;
+          promptFeedback?: { blockReason?: string };
+          usageMetadata?: Record<string, unknown>;
+        };
+        const candidate = data.candidates?.[0];
+        blocked ||= Boolean(data.promptFeedback?.blockReason);
+        blocked ||= Boolean(
+          candidate?.finishReason &&
+            !['STOP', 'MAX_TOKENS'].includes(candidate.finishReason),
+        );
+        for (const part of candidate?.content?.parts ?? []) {
+          parts.push(part);
+          if (part.text && !part.thought) {
+            visible = true;
+            yield { type: 'delta', text: text.push(part.text) };
+          }
         }
-      if (data.usageMetadata) usage = googleUsage(data.usageMetadata);
+        // o Gemini repete o uso acumulado da volta em cada pedaço
+        if (data.usageMetadata) roundUsage = googleUsage(data.usageMetadata);
+      }
+      usage = addUsage(usage, roundUsage);
+      const calls = parts.filter((part) => part.functionCall?.name);
+      if (!calls.length || !tools.length || blocked) break;
+      contents.push({ role: 'model', parts });
+      const responses: unknown[] = [];
+      for (const { functionCall: call } of calls) {
+        const name = String(call!.name);
+        yield { type: 'status', text: toolLabel(tools, name) };
+        const result = await p.runTool!(name, JSON.stringify(call!.args ?? {}));
+        responses.push({
+          functionResponse: {
+            name,
+            ...(call!.id ? { id: call!.id } : {}),
+            response: { result },
+          },
+        });
+      }
+      contents.push({ role: 'user', parts: responses });
     }
     if (usage) yield { type: 'usage', usage };
     if (blocked) throw new Error('O Gemini bloqueou esta resposta');

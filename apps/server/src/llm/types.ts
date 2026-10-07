@@ -25,6 +25,8 @@ export interface ImageParams {
   baseUrl?: string;
   model: string;
   prompt: string;
+  /** Imagens de referência: quando houver, a imagem é editada em vez de criada do zero. */
+  images?: ImageInput[];
   signal: AbortSignal;
 }
 export interface ImageResult {
@@ -39,6 +41,15 @@ export interface TokenUsage {
   reasoningTokens: number | null;
   outputTokens: number | null;
 }
+/** Ferramenta (extensão) que o modelo pode chamar; executada no servidor. */
+export interface ToolSpec {
+  name: string;
+  /** Texto curto mostrado ao usuário enquanto a ferramenta roda. */
+  label: string;
+  description: string;
+  /** JSON Schema simples (object/properties/required), aceito pelos três formatos. */
+  parameters: Record<string, unknown>;
+}
 export interface StreamParams {
   apiKey: string;
   baseUrl?: string;
@@ -47,6 +58,9 @@ export interface StreamParams {
   temperature?: number;
   maxTokens?: number;
   webSearch?: boolean;
+  tools?: ToolSpec[];
+  /** Executa a ferramenta pedida pelo modelo; recebe os argumentos em JSON. */
+  runTool?: (name: string, args: string) => Promise<string>;
   signal: AbortSignal;
 }
 export interface WebSource {

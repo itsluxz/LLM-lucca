@@ -6,27 +6,46 @@ import { env } from '../../config/env.js';
 import { streams } from '../../lib/streams/index.js';
 import { openSse, sendSse } from '../../lib/sse.js';
 import type {
+  ChatMessage,
+  ImageInput,
   ImageParams,
   LLMProvider,
   StreamEvent,
   TokenUsage,
 } from '../../llm/types.js';
 import { storage } from '../../lib/storage/index.js';
-import { imageKey, imageUrlPrefix } from '../images/routes.js';
+import {
+  imageKey,
+  imageRefs,
+  imageUrlPrefix,
+  loadImages,
+} from '../images/routes.js';
 import { uid } from '../../middlewares/auth.js';
 import { asyncRoute, httpError } from '../../middlewares/error.js';
 import { chatLimit } from '../../middlewares/rateLimit.js';
 import { validate } from '../../middlewares/validate.js';
 import { ownedConversation } from '../conversations/routes.js';
 import { chatContext, normalizeUsage } from './service.js';
+import { runTool, toolSpecs } from '../../llm/tools/index.js';
+import type { GeneratedFile } from '../../llm/tools/types.js';
 export const chatRoutes = Router();
 const send = z.object({
   content: z.string().trim().min(1).max(200000),
   model: z.string().optional(),
   webSearch: z.boolean().optional(),
   maxTokens: z.number().int().min(1).max(1_000_000).optional(),
+  /** Extensões (ferramentas) que o modelo pode usar nesta resposta. */
+  tools: z.array(z.string().max(64)).max(20).optional(),
 });
-const regenerateBody = send.pick({ webSearch: true, maxTokens: true });
+const regenerateBody = send.pick({ webSearch: true, maxTokens: true, tools: true });
+function filesMarkdown(files: GeneratedFile[]): string {
+  if (!files.length) return '';
+  const kb = (n: number) => `${Math.max(1, Math.round(n / 1024))} KB`;
+  const lines = files.map(
+    (f) => `- [${f.name.replace(/[[\]]/g, '')}](${f.url}) (${kb(f.sizeBytes)})`,
+  );
+  return `\n\n---\n**Arquivos:**\n${lines.join('\n')}`;
+}
 function sourcesMarkdown(sources: Map<string, string | undefined>): string {
   if (!sources.size) return '';
   const lines = [...sources].map(([url, title], i) => {
@@ -67,6 +86,25 @@ function generationError(e: unknown): string {
     return `Não foi possível conectar ao provedor: certificado TLS não confiável (${code}). Um antivírus ou proxy pode estar interceptando o HTTPS.`;
   return `Não foi possível conectar ao provedor (${code})`;
 }
+/**
+ * Imagens que o modelo de imagem deve editar: as anexadas à mensagem atual
+ * ou, se não houver, a imagem mais recente da conversa (enviada ou gerada),
+ * para pedidos como "agora deixa o fundo azul".
+ */
+export async function referenceImages(
+  userId: string,
+  lastUser: ChatMessage | undefined,
+  history: Array<{ content: string }>,
+): Promise<ImageInput[]> {
+  if (lastUser?.images?.length) return lastUser.images;
+  for (const message of [...history].reverse()) {
+    const key = imageRefs(message.content).at(-1);
+    if (!key) continue;
+    const images = await loadImages(userId, `![](${imageUrlPrefix}${key})`);
+    if (images.length) return images;
+  }
+  return [];
+}
 async function* imageEvents(
   adapter: LLMProvider,
   userId: string,
@@ -74,7 +112,10 @@ async function* imageEvents(
 ): AsyncIterable<StreamEvent> {
   if (!adapter.generateImage) throw new Error('Este provedor não gera imagens');
   if (!params.prompt.trim()) throw new Error('Descreva a imagem que você quer');
-  yield { type: 'status', text: 'Gerando imagem…' };
+  yield {
+    type: 'status',
+    text: params.images?.length ? 'Editando a imagem…' : 'Gerando imagem…',
+  };
   const image = await adapter.generateImage(params);
   const key = imageKey(userId);
   await storage.put(key, image.data);
@@ -130,10 +171,13 @@ async function generate(
     official: TokenUsage | null = null,
     error: string | null = null;
   const sources = new Map<string, string | undefined>();
+  // arquivos criados pelas extensões; os links vão no fim da resposta
+  const files: GeneratedFile[] = [];
   const adapter = context.resolved.adapter;
   const apiKey = decrypt(context.key.encryptedKey, env.ENCRYPTION_KEY);
   const baseUrl = context.key.baseUrl ?? undefined;
   const started = Date.now();
+  const lastUser = [...context.messages].reverse().find((m) => m.role === 'user');
   const events: AsyncIterable<StreamEvent> = adapter.isImageModel?.(
     context.resolved.model,
   )
@@ -141,9 +185,8 @@ async function generate(
         apiKey,
         baseUrl,
         model: context.resolved.model,
-        prompt:
-          [...context.messages].reverse().find((m) => m.role === 'user')
-            ?.content ?? '',
+        prompt: lastUser?.content ?? '',
+        images: await referenceImages(userId, lastUser, context.history),
         signal: controller.signal,
       })
     : adapter.streamChat({
@@ -153,6 +196,13 @@ async function generate(
         messages: context.messages,
         webSearch: Boolean(req.body.webSearch && adapter.supportsWebSearch),
         maxTokens: req.body.maxTokens,
+        tools: toolSpecs(req.body.tools),
+        runTool: (name, args) =>
+          runTool(name, args, {
+            signal: controller.signal,
+            userId,
+            onFile: (file) => files.push(file),
+          }),
         signal: controller.signal,
       });
   try {
@@ -172,7 +222,7 @@ async function generate(
     await streams.remove(id);
   }
   const outputText = content;
-  const footer = content ? sourcesMarkdown(sources) : '';
+  const footer = (content ? sourcesMarkdown(sources) : '') + filesMarkdown(files);
   if (footer) {
     content += footer;
     if (!disconnected) sendSse(res, 'delta', { text: footer });

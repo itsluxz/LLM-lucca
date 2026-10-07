@@ -6,6 +6,12 @@ import type {
   TokenUsage,
 } from '../types.js';
 import { checked, parseSse } from './sseParser.js';
+import {
+  activeTools,
+  maxToolRounds,
+  RoundText,
+  toolLabel,
+} from '../tools/loop.js';
 const headers = (key: string) => ({
   'x-api-key': key,
   'anthropic-version': '2023-06-01',
@@ -89,8 +95,14 @@ export const anthropic: LLMProvider = {
     let input: Record<string, unknown> = {};
     let output: Record<string, unknown> = {};
     let thinking = '';
-    // pause_turn: a busca no servidor pausou; reenviar a resposta parcial para continuar
-    for (let turn = 0; turn <= maxContinuations; turn++) {
+    const tools = activeTools(p);
+    const text = new RoundText();
+    let toolRounds = 0;
+    // pause_turn: a busca no servidor pausou; reenviar a resposta parcial para continuar.
+    // tool_use: o modelo pediu uma extensão; executar e devolver o resultado.
+    for (let turn = 0; turn <= maxContinuations + maxToolRounds; turn++) {
+      // última volta de extensões: o modelo precisa responder com texto
+      const lastToolRound = tools.length > 0 && toolRounds >= maxToolRounds - 1;
       const request = (tool: string) =>
         fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -103,8 +115,20 @@ export const anthropic: LLMProvider = {
             max_tokens: p.maxTokens ?? 4096,
             stream: true,
             temperature: p.temperature,
-            ...(p.webSearch
-              ? { tools: [{ type: tool, name: 'web_search', max_uses: 5 }] }
+            ...(p.webSearch || tools.length
+              ? {
+                  tools: [
+                    ...(p.webSearch
+                      ? [{ type: tool, name: 'web_search', max_uses: 5 }]
+                      : []),
+                    ...tools.map((t) => ({
+                      name: t.name,
+                      description: t.description,
+                      input_schema: t.parameters,
+                    })),
+                  ],
+                  ...(lastToolRound ? { tool_choice: { type: 'none' } } : {}),
+                }
               : {}),
           }),
         });
@@ -117,6 +141,7 @@ export const anthropic: LLMProvider = {
       }
       const res = await checked(raw);
       if (!res.body) throw new Error('Provedor não abriu o stream');
+      text.nextRound();
       const blocks: Block[] = [];
       let stopReason: string | undefined;
       for await (const frame of parseSse(res.body)) {
@@ -146,7 +171,7 @@ export const anthropic: LLMProvider = {
           };
           if (delta?.type === 'text_delta' && delta.text) {
             if (block) block.text = String(block.text ?? '') + delta.text;
-            yield { type: 'delta', text: delta.text };
+            yield { type: 'delta', text: text.push(delta.text) };
           }
           if (delta?.type === 'thinking_delta') {
             thinking += delta.thinking ?? '';
@@ -192,6 +217,25 @@ export const anthropic: LLMProvider = {
           stopReason = (data.delta as { stop_reason?: string } | undefined)
             ?.stop_reason;
         }
+      }
+      if (stopReason === 'tool_use' && tools.length) {
+        const calls = blocks.filter((b) => b?.type === 'tool_use');
+        messages.push({ role: 'assistant', content: blocks.filter(Boolean) });
+        const results: unknown[] = [];
+        for (const call of calls) {
+          yield { type: 'status', text: toolLabel(tools, String(call.name)) };
+          results.push({
+            type: 'tool_result',
+            tool_use_id: call.id,
+            content: await p.runTool!(
+              String(call.name),
+              JSON.stringify(call.input ?? {}),
+            ),
+          });
+        }
+        messages.push({ role: 'user', content: results });
+        toolRounds++;
+        continue;
       }
       if (stopReason !== 'pause_turn') break;
       messages.push({ role: 'assistant', content: blocks.filter(Boolean) });
