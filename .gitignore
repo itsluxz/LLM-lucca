@@ -3,7 +3,7 @@ dist/
 .env
 .env.example
 apps/*/.env
-storage/
+/storage/
 coverage/
 *.log
 .vite/
