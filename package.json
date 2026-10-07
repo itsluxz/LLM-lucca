@@ -1,0 +1,34 @@
+{
+  "name": "llm-lucca",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "docker compose up -d db && concurrently -n api,web \"npm -w apps/server run dev\" \"npm -w apps/web run dev\"",
+    "build": "npm -w apps/web run build && npm -w apps/server run build",
+    "start": "docker compose up -d db && node scripts/start.mjs",
+    "db:migrate": "node scripts/run-prisma.mjs",
+    "db:studio": "npm -w apps/server exec prisma studio",
+    "test": "npm -w apps/server run test",
+    "lint": "eslint apps/server/src apps/server/prisma apps/web/src",
+    "format": "prettier --write \"apps/server/src/**/*.{ts,tsx}\" \"apps/web/src/**/*.{ts,tsx,css}\" \"scripts/*.mjs\"",
+    "qa:visual": "node scripts/visual-qa.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.12.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "playwright-core": "^1.63.0",
+    "prettier": "^3.6.2",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.71.1"
+  }
+}
